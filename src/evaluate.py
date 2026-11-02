@@ -7,11 +7,10 @@ from sklearn.model_selection import train_test_split
 from .models import METHODS, fit_predict
 from .preprocessing import clean_and_scale, get_features
 
-MAX_TEST = 10000
+MAX_TEST = 100000
 
 
 def get_labels(df):
-    """Возвращает Class как 0/1 или None, если по нему нельзя оценивать качество."""
     if "Class" not in df.columns:
         return None
     y = pd.to_numeric(df["Class"], errors="coerce")
@@ -29,7 +28,6 @@ def calc_metrics(y_true, y_pred):
 
 
 def detect_anomalies(df, method):
-    """Ищет аномалии во всём файле. Возвращает df без Class + столбец Anomaly."""
     X = get_features(df)
     train, test = clean_and_scale(X, X)
     result = df.drop(columns=["Class"], errors="ignore").copy()
@@ -38,7 +36,6 @@ def detect_anomalies(df, method):
 
 
 def evaluate_holdout(df, method):
-    """Честная оценка: обучаем на train, считаем метрики на новых для модели данных."""
     y = get_labels(df)
     if y is None:
         raise ValueError("Для оценки нужен столбец Class со значениями 0 и 1 (оба класса).")
@@ -66,7 +63,6 @@ def evaluate_holdout(df, method):
 
 
 def compare_methods(df):
-    """Прогоняет все алгоритмы. Каждый обучается один раз."""
     has_labels = get_labels(df) is not None
     rows = []
     for m in METHODS:
