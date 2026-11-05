@@ -1,4 +1,3 @@
-import io
 import time
 
 import altair as alt
@@ -11,11 +10,6 @@ from src.models import METHODS
 SHOW_ROWS = 1000  # сколько аномалий показывать в таблице
 MAX_POINTS = 2000   # сколько точек каждого типа рисовать на графике сумм
 COLORS = alt.Scale(domain=["Обычные", "Аномалии"], range=["#4388D6", "#E05252"])
-
-
-@st.cache_data
-def load_csv(data: bytes) -> pd.DataFrame:
-    return pd.read_csv(io.BytesIO(data))
 
 
 def show_single_result(res):
@@ -63,8 +57,6 @@ def show_single_result(res):
     if "Amount" in result.columns:
         data = result[["Amount", "Anomaly"]].copy()
         data["Тип"] = data["Anomaly"].map({0: "Обычные", 1: "Аномалии"})
-        # на график берём не больше MAX_POINTS точек каждого типа,
-        # иначе браузер зависает на десятках тысяч точек
         data = pd.concat([
             g.sample(min(len(g), MAX_POINTS), random_state=42)
             for _, g in data.groupby("Anomaly")
@@ -81,10 +73,11 @@ def show_single_result(res):
         )
 
     st.download_button(
-        "Скачать результаты CSV",
+        "Скачать найденные аномалии (CSV)",
         res["csv"],
-        file_name="anomaly_results.csv",
+        file_name="anomalies.csv",
         mime="text/csv",
+        on_click="ignore",  # не перезапускать страницу при скачивании
     )
 
 
@@ -147,16 +140,17 @@ if uploaded is None:
     st.info("Загрузите CSV-файл, чтобы начать работу.")
     st.stop()
 
-try:
-    df = load_csv(uploaded.getvalue())
-except Exception as e:
-    st.error(f"Не удалось прочитать файл: {e}")
-    st.stop()
-
-# сбрасываем старые результаты при загрузке нового файла
 if st.session_state.get("file_id") != uploaded.file_id:
     st.session_state.clear()
-    st.session_state["file_id"] = uploaded.file_id
+    try:
+        with st.spinner("Читаю файл..."):
+            st.session_state["df"] = pd.read_csv(uploaded)
+        st.session_state["file_id"] = uploaded.file_id
+    except Exception as e:
+        st.error(f"Не удалось прочитать файл: {e}")
+        st.stop()
+
+df = st.session_state["df"]
 
 st.success("Файл успешно загружен!")
 c1, c2 = st.columns(2)
@@ -174,7 +168,12 @@ if b1.button("Запустить анализ"):
             start = time.perf_counter()
             result = detect_anomalies(df, method)
             seconds = time.perf_counter() - start
-            csv = result.to_csv(index=False).encode("utf-8-sig")  # один раз, а не при каждой перерисовке
+
+            csv = (
+                result[result["Anomaly"] == 1]
+                .to_csv(index=False, sep=";", decimal=",", float_format="%.8g")
+                .encode("utf-8-sig")
+            )
         y = get_labels(df)
         metrics = calc_metrics(y, result["Anomaly"]) if y is not None else None
         st.session_state["single"] = {
@@ -191,7 +190,6 @@ if b2.button("Сравнить все алгоритмы"):
     except Exception as e:
         st.error(f"Ошибка при сравнении: {e}")
 
-# результаты берутся из session_state, поэтому не пропадают при любом действии на странице
 if "single" in st.session_state:
     show_single_result(st.session_state["single"])
 
