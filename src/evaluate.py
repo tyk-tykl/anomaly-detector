@@ -1,13 +1,21 @@
 import time
 
+import numpy as np
 import pandas as pd
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.metrics import (
+    average_precision_score,
+    f1_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+)
 from sklearn.model_selection import train_test_split
 
-from .models import METHODS, fit_predict
+from .models import METHODS, fit_predict, fit_predict_score
 from .preprocessing import clean_and_scale, get_features
 
 MAX_TEST = 100000
+MAX_CURVE_POINTS = 500
 
 
 def get_labels(df):
@@ -35,6 +43,14 @@ def detect_anomalies(df, method):
     return result
 
 
+def _pr_curve(y_true, score):
+    precision, recall, _ = precision_recall_curve(y_true, score)
+    if len(precision) > MAX_CURVE_POINTS:
+        idx = np.linspace(0, len(precision) - 1, MAX_CURVE_POINTS).astype(int)
+        precision, recall = precision[idx], recall[idx]
+    return pd.DataFrame({"Recall": recall, "Precision": precision})
+
+
 def evaluate_holdout(df, method):
     y = get_labels(df)
     if y is None:
@@ -53,26 +69,33 @@ def evaluate_holdout(df, method):
         )
 
     train, test = clean_and_scale(X_tr, X_te)
-    pred = fit_predict(method, train, test)
+    pred, score = fit_predict_score(method, train, test)
 
-    return {
+    metrics = {
         **calc_metrics(y_te, pred),
+        "Avg Precision": average_precision_score(y_te, score),
         "Проверочных записей": len(y_te),
         "Найдено аномалий": int(pred.sum()),
     }
+    return metrics, _pr_curve(y_te, score)
 
 
 def compare_methods(df):
-    has_labels = get_labels(df) is not None
-    rows = []
+    y = get_labels(df)
+    rows, curves = [], []
     for m in METHODS:
         start = time.perf_counter()
-        if has_labels:
-            q = evaluate_holdout(df, m)
-            row = {"Алгоритм": m, **q}
+        if y is not None:
+            metrics, curve = evaluate_holdout(df, m)
+            row = {"Алгоритм": m, **metrics}
+            curves.append(curve.assign(Алгоритм=m))
         else:
             found = int(detect_anomalies(df, m)["Anomaly"].sum())
             row = {"Алгоритм": m, "Найдено аномалий": found}
         row["Время (сек.)"] = round(time.perf_counter() - start, 2)
         rows.append(row)
-    return pd.DataFrame(rows)
+
+    table = pd.DataFrame(rows)
+    curves_df = pd.concat(curves, ignore_index=True) if curves else pd.DataFrame()
+    baseline = float(y.mean()) if y is not None else None
+    return table, curves_df, baseline

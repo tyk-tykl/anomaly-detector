@@ -22,16 +22,16 @@ def _subsample(X, size=MAX_TRAIN, seed=42):
     return X[idx]
 
 
-def _predict_parallel(model, X, chunk=20000):
+def _parallel(func, X, chunk=20000):
     parts = np.array_split(X, max(1, len(X) // chunk))
-    results = Parallel(n_jobs=-1)(delayed(model.predict)(p) for p in parts)
+    results = Parallel(n_jobs=-1)(delayed(func)(p) for p in parts)
     return np.concatenate(results)
 
 
-def fit_predict(method, train, test):
+def fit_predict_score(method, train, test):
     if method == "Z-score":
-        # после StandardScaler z-score — это просто значение признака
-        return (np.abs(test) > 3).any(axis=1).astype(int)
+        score = np.abs(test).max(axis=1)
+        return (score > 3).astype(int), score
 
     if method not in MODELS:
         raise ValueError("Неизвестный алгоритм.")
@@ -39,15 +39,19 @@ def fit_predict(method, train, test):
     model = MODELS[method]()
 
     if method == "Isolation Forest":
-        model.fit(train)  # быстрый, подвыборка не нужна
+        model.fit(train)
     elif method == "One-Class SVM":
         model.fit(_subsample(train, SVM_TRAIN))
     else:
         model.fit(_subsample(train))
 
     if method == "One-Class SVM":
-        pred = _predict_parallel(model, test)
+        dec = _parallel(model.decision_function, test)
     else:
-        pred = model.predict(test)
+        dec = model.decision_function(test)
 
-    return (pred == -1).astype(int)
+    return (dec < 0).astype(int), -dec
+
+
+def fit_predict(method, train, test):
+    return fit_predict_score(method, train, test)[0]
