@@ -1,5 +1,6 @@
 import time
 
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
@@ -16,6 +17,7 @@ from .preprocessing import clean_and_scale, get_features
 
 MAX_TEST = 100000
 MAX_CURVE_POINTS = 500
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 
 def get_labels(df):
@@ -99,3 +101,9 @@ def compare_methods(df):
     curves_df = pd.concat(curves, ignore_index=True) if curves else pd.DataFrame()
     baseline = float(y.mean()) if y is not None else None
     return table, curves_df, baseline
+
+def save_comparison(table):
+    RESULTS_DIR.mkdir(exist_ok=True)
+    path = RESULTS_DIR / "comparison.csv"
+    table.to_csv(path, index=False, encoding="utf-8-sig")
+    return path

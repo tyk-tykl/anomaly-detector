@@ -4,7 +4,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from src.evaluate import calc_metrics, compare_methods, detect_anomalies, get_labels
+from src.evaluate import calc_metrics, compare_methods, detect_anomalies, get_labels, save_comparison
 from src.models import METHODS
 
 SHOW_ROWS = 1000  # сколько аномалий показывать в таблице
@@ -86,6 +86,14 @@ def show_comparison(comp):
 
     st.subheader("Сравнение алгоритмов")
     st.dataframe(table, width="stretch")
+
+    st.download_button(
+        "Скачать таблицу сравнения (CSV)",
+        table.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+        file_name="comparison.csv",
+        mime="text/csv",
+        on_click="ignore",
+    )
 
     st.subheader("Время работы")
     st.bar_chart(table.set_index("Алгоритм")["Время (сек.)"])
@@ -186,7 +194,9 @@ if b1.button("Запустить анализ"):
 if b2.button("Сравнить все алгоритмы"):
     try:
         with st.spinner("Сравниваю алгоритмы..."):
-            st.session_state["comparison"] = compare_methods(df)
+            comp = compare_methods(df)
+            save_comparison(comp[0])
+            st.session_state["comparison"] = comp
     except Exception as e:
         st.error(f"Ошибка при сравнении: {e}")
 
