@@ -8,9 +8,9 @@ MAX_TRAIN = 5000
 SVM_TRAIN = 2500
 
 MODELS = {
-    "Isolation Forest": lambda: IsolationForest(random_state=42),
-    "LOF": lambda: LocalOutlierFactor(n_neighbors=20, novelty=True, n_jobs=-1),
-    "One-Class SVM": lambda: OneClassSVM(kernel="rbf", gamma="scale", nu=0.05),
+    "Isolation Forest": lambda seed: IsolationForest(random_state=seed),
+    "LOF": lambda seed: LocalOutlierFactor(n_neighbors=20, novelty=True, n_jobs=-1),
+    "One-Class SVM": lambda seed: OneClassSVM(kernel="rbf", gamma="scale", nu=0.05),
 }
 METHODS = ["Z-score", *MODELS]
 
@@ -28,7 +28,7 @@ def _parallel(func, X, chunk=20000):
     return np.concatenate(results)
 
 
-def fit_predict_score(method, train, test):
+def fit_predict_score(method, train, test, seed=42):
     if method == "Z-score":
         score = np.abs(test).max(axis=1)
         return (score > 3).astype(int), score
@@ -36,14 +36,14 @@ def fit_predict_score(method, train, test):
     if method not in MODELS:
         raise ValueError("Неизвестный алгоритм.")
 
-    model = MODELS[method]()
+    model = MODELS[method](seed)
 
     if method == "Isolation Forest":
         model.fit(train)
     elif method == "One-Class SVM":
-        model.fit(_subsample(train, SVM_TRAIN))
+        model.fit(_subsample(train, SVM_TRAIN, seed))
     else:
-        model.fit(_subsample(train))
+        model.fit(_subsample(train, MAX_TRAIN, seed))
 
     if method == "One-Class SVM":
         dec = _parallel(model.decision_function, test)

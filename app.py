@@ -87,9 +87,15 @@ def show_comparison(comp):
     st.subheader("Сравнение алгоритмов")
     st.dataframe(table, width="stretch")
 
+    if "F1-score ±" in table.columns:
+        st.caption("Метрики усреднены по 5 запускам с разным разбиением данных, "
+                   "столбцы со знаком ± показывают стандартное отклонение. "
+                   "Precision@1% и Recall@1%: качество среди 1% транзакций "
+                   "с самым высоким score.")
+
     st.download_button(
         "Скачать таблицу сравнения (CSV)",
-        table.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+        table.round(4).to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
         file_name="comparison.csv",
         mime="text/csv",
         on_click="ignore",
