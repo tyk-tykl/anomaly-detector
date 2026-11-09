@@ -1,5 +1,9 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
+
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
+RESULTS_DIR.mkdir(exist_ok=True)
 
 # Результаты сравнения алгоритмов
 results = {
@@ -43,7 +47,7 @@ plt.ylim(0, 0.09)
 plt.xticks(rotation=15)
 plt.tight_layout()
 
-plt.savefig("../results/results_comparison.png", dpi=300)
+plt.savefig(RESULTS_DIR / "results_comparison.png", dpi=300)
 plt.show()
 
 # График 2. Сравнение Precision и Recall
@@ -74,5 +78,5 @@ plt.ylim(0, 1.05)
 plt.legend()
 plt.tight_layout()
 
-plt.savefig("../results/precision_recall_comparison.png", dpi=300)
+plt.savefig(RESULTS_DIR / "precision_recall_comparison.png", dpi=300)
 plt.show()

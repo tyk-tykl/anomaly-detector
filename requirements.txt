@@ -2,4 +2,5 @@ pandas
 numpy
 scikit-learn
 matplotlib
-streamlit
+altair
+streamlit>=1.65

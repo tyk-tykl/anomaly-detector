@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-file_path = Path(__file__).parent / "data" / "processed" / "creditcard_clean.csv"
+file_path = Path(__file__).resolve().parent.parent / "data" / "processed" / "creditcard_clean.csv"
 df = pd.read_csv(file_path)
 
 #Отделяем признаки от правильных ответов

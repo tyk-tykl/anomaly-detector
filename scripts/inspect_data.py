@@ -1,7 +1,7 @@
 from pathlib import Path
 import pandas as pd
 
-file_path = Path(__file__).parent / "data" / "raw" / "creditcard.csv"
+file_path = Path(__file__).resolve().parent.parent / "data" / "raw" / "creditcard.csv"
 
 df = pd.read_csv(file_path)
 
