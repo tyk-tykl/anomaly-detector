@@ -9,7 +9,7 @@ from src.evaluate import (calc_metrics, compare_methods, confusion_table,
                           detect_anomalies, get_labels, save_comparison)
 from src.models import METHODS
 
-SHOW_ROWS = 1000       # сколько аномалий показывать в таблице
+SHOW_ROWS = 200  # сколько аномалий показывать в таблице
 MAX_POINTS = 2000      # сколько точек каждого типа рисовать на графике сумм
 FULL_XLSX_MAX = 100000  # полный файл предлагаем скачать, если строк не больше
 COLORS = alt.Scale(domain=["Обычные", "Аномалии"], range=["#4388D6", "#E05252"])
@@ -60,8 +60,16 @@ def show_single_result(res):
     if len(anomalies) > SHOW_ROWS:
         st.caption(f"Показаны первые {SHOW_ROWS} из {len(anomalies)} записей. "
                    "Полный список можно скачать в Excel.")
+
     first = ["Score", "Почему аномально"]
-    cols = first + [c for c in anomalies.columns if c not in first]
+    preferred = [c for c in ("ID", "Time", "Amount", "Country", "Merchant",
+                             "Category", "Class", "is_fraud") if c in anomalies.columns]
+    rest = [c for c in anomalies.columns if c not in first]
+    brief = first + (preferred if preferred else rest[:6])
+
+    show_all = st.toggle("Показать все столбцы", value=False,
+                         help="Все признаки (например V1–V28) делают таблицу тяжёлой.")
+    cols = first + rest if show_all else brief
     st.dataframe(anomalies[cols].head(SHOW_ROWS), width="stretch")
 
     st.subheader("Визуализация")
