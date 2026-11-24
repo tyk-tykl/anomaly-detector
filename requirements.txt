@@ -4,3 +4,4 @@ scikit-learn
 matplotlib
 altair
 streamlit>=1.65
+openpyxl

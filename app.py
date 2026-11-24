@@ -3,6 +3,7 @@ import time
 import altair as alt
 import pandas as pd
 import streamlit as st
+import io
 
 from src.evaluate import (calc_metrics, compare_methods, confusion_table,
                           detect_anomalies, get_labels, save_comparison)
@@ -12,6 +13,13 @@ SHOW_ROWS = 1000  # сколько аномалий показывать в та
 MAX_POINTS = 2000   # сколько точек каждого типа рисовать на графике сумм
 FULL_CSV_MAX = 100000  # полный файл предлагаем скачать, если строк не больше
 COLORS = alt.Scale(domain=["Обычные", "Аномалии"], range=["#4388D6", "#E05252"])
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def to_xlsx(df):
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    return buf.getvalue()
 
 
 def show_single_result(res):
@@ -86,18 +94,21 @@ def show_single_result(res):
     st.download_button(
         "Скачать найденные аномалии (CSV)",
         res["csv"],
-        file_name="anomalies.csv",
-        mime="text/csv",
-        on_click="ignore",  # не перезапускать страницу при скачивании
+        file_name="anomalies.xlsx",
+        mime=XLSX_MIME,
+        key="dl_anomalies",  # не перезапускать страницу при скачивании
     )
+
+    if res.get("full_csv") is not None:
+        st.caption(f"Размер подготовленного файла: {len(res['full_csv']) / 1024:.0f} КБ")
 
     if res.get("full_csv") is not None:
         st.download_button(
             "Скачать весь файл с Score и Anomaly (CSV)",
             res["full_csv"],
-            file_name="all_transactions_scored.csv",
-            mime="text/csv",
-            on_click="ignore",
+            file_name="all_transactions_scored.xlsx",
+            mime=XLSX_MIME,
+            key="dl_full",
         )
     else:
         st.caption(f"Файл больше {FULL_CSV_MAX} строк, полная выгрузка отключена: "
@@ -197,9 +208,11 @@ df = st.session_state["df"]
 st.sidebar.subheader("Столбцы")
 all_cols = list(df.columns)
 label_options = ["— нет —"] + all_cols
+guess = next((c for c in all_cols
+              if c.lower() in ("class", "is_fraud", "fraud", "label", "anomaly", "target")), None)
 label_choice = st.sidebar.selectbox(
     "Столбец с меткой (необязательно)", label_options,
-    index=label_options.index("Class") if "Class" in all_cols else 0,
+    index=label_options.index(guess) if guess else 0,
     help="Столбец, где 1 — аномалия, 0 — норма. Нужен только для подсчёта метрик, "
          "в признаки он не попадает.")
 label_col = None if label_choice == "— нет —" else label_choice
@@ -208,6 +221,7 @@ candidates = [c for c in all_cols if c != label_col]
 default_feats = [c for c in candidates if not c.lower().endswith("id")]
 feature_cols = st.sidebar.multiselect(
     "Признаки для анализа", candidates, default=default_feats,
+    key=f"features_{label_col}",
     help="Числа берутся как есть, даты превращаются в час и день недели, "
          "текстовые столбцы — в частоту встречаемости. Столбцы-идентификаторы лучше убрать.")
 if not feature_cols:
@@ -231,19 +245,10 @@ if b1.button("Запустить анализ"):
             result = detect_anomalies(df, method, use_log, feature_cols, label_col)
             seconds = time.perf_counter() - start
 
-            csv = (
-                result[result["Anomaly"] == 1]
-                .sort_values("Score", ascending=False)
-                .to_csv(index=False, sep=";", decimal=",", float_format="%.8g")
-                .encode("utf-8-sig")
-            )
-            full_csv = None
-            if len(result) <= FULL_CSV_MAX:
-                full_csv = (
-                    result.sort_values("Score", ascending=False)
-                    .to_csv(index=False, sep=";", decimal=",", float_format="%.8g")
-                    .encode("utf-8-sig")
-                )
+            sorted_all = result.sort_values("Score", ascending=False)
+            csv = to_xlsx(sorted_all[sorted_all["Anomaly"] == 1])
+            full_csv = to_xlsx(sorted_all) if len(result) <= FULL_CSV_MAX else None
+
         y = get_labels(df, label_col)
         metrics = calc_metrics(y, result["Anomaly"]) if y is not None else None
         st.session_state["single"] = {
