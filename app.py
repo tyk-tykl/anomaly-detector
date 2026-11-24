@@ -1,17 +1,17 @@
+import io
 import time
 
 import altair as alt
 import pandas as pd
 import streamlit as st
-import io
 
 from src.evaluate import (calc_metrics, compare_methods, confusion_table,
                           detect_anomalies, get_labels, save_comparison)
 from src.models import METHODS
 
-SHOW_ROWS = 1000  # сколько аномалий показывать в таблице
-MAX_POINTS = 2000   # сколько точек каждого типа рисовать на графике сумм
-FULL_CSV_MAX = 100000  # полный файл предлагаем скачать, если строк не больше
+SHOW_ROWS = 1000       # сколько аномалий показывать в таблице
+MAX_POINTS = 2000      # сколько точек каждого типа рисовать на графике сумм
+FULL_XLSX_MAX = 100000  # полный файл предлагаем скачать, если строк не больше
 COLORS = alt.Scale(domain=["Обычные", "Аномалии"], range=["#4388D6", "#E05252"])
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -23,8 +23,9 @@ def to_xlsx(df):
 
 
 def show_single_result(res):
-    result, metrics = res["result"], res["metrics"]
-    anomalies = result[result["Anomaly"] == 1].sort_values("Score", ascending=False)
+    metrics = res["metrics"]
+    anomalies = res["anomalies"]
+    n_total = res["n_total"]
 
     st.success(f"Анализ завершён: {res['method']} (расчёт занял {res['seconds']:.1f} сек.)")
 
@@ -38,18 +39,18 @@ def show_single_result(res):
                    "Честную оценку смотрите в «Сравнить все алгоритмы».")
         c1, c2, c3 = st.columns(3)
         c1.metric("Precision", f"{metrics['Precision']:.4f}")
+        c2.metric("Recall", f"{metrics['Recall']:.4f}")
+        c3.metric("F1-score", f"{metrics['F1-score']:.4f}")
         if res.get("confusion") is not None:
             st.write("Матрица ошибок")
             st.dataframe(res["confusion"], width="stretch")
-        c2.metric("Recall", f"{metrics['Recall']:.4f}")
-        c3.metric("F1-score", f"{metrics['F1-score']:.4f}")
     else:
         st.info("Для оценки качества выберите в боковой панели столбец с меткой (значения 0 и 1).")
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Всего транзакций", len(result))
+    c1.metric("Всего транзакций", n_total)
     c2.metric("Найдено аномалий", len(anomalies))
-    c3.metric("Доля аномалий", f"{len(anomalies) / len(result) * 100:.2f}%")
+    c3.metric("Доля аномалий", f"{len(anomalies) / n_total * 100:.2f}%")
 
     st.subheader("Найденные аномалии")
     st.caption("Отсортированы по Score: чем выше, тем необычнее запись. Шкала Score у разных "
@@ -58,7 +59,7 @@ def show_single_result(res):
                "Это приближённое объяснение, а не внутренняя логика модели.")
     if len(anomalies) > SHOW_ROWS:
         st.caption(f"Показаны первые {SHOW_ROWS} из {len(anomalies)} записей. "
-                   "Полный список можно скачать в CSV.")
+                   "Полный список можно скачать в Excel.")
     first = ["Score", "Почему аномально"]
     cols = first + [c for c in anomalies.columns if c not in first]
     st.dataframe(anomalies[cols].head(SHOW_ROWS), width="stretch")
@@ -66,7 +67,7 @@ def show_single_result(res):
     st.subheader("Визуализация")
     counts = pd.DataFrame({
         "Тип": ["Обычные", "Аномалии"],
-        "Количество": [(result["Anomaly"] == 0).sum(), (result["Anomaly"] == 1).sum()],
+        "Количество": [n_total - len(anomalies), len(anomalies)],
     })
     st.altair_chart(
         alt.Chart(counts).mark_bar().encode(
@@ -77,13 +78,8 @@ def show_single_result(res):
         width="stretch",
     )
 
-    if "Amount" in result.columns:
-        data = result[["Amount", "Anomaly"]].copy()
-        data["Тип"] = data["Anomaly"].map({0: "Обычные", 1: "Аномалии"})
-        data = pd.concat([
-            g.sample(min(len(g), MAX_POINTS), random_state=42)
-            for _, g in data.groupby("Anomaly")
-        ])
+    data = res["amount_sample"]
+    if data is not None:
         st.altair_chart(
             alt.Chart(data).mark_circle(opacity=0.6, size=45).encode(
                 x=alt.X("Amount:Q", title="Сумма транзакции", scale=alt.Scale(zero=False)),
@@ -96,26 +92,23 @@ def show_single_result(res):
         )
 
     st.download_button(
-        "Скачать найденные аномалии (CSV)",
-        res["csv"],
+        "Скачать найденные аномалии (Excel)",
+        res["anomalies_xlsx"],
         file_name="anomalies.xlsx",
         mime=XLSX_MIME,
-        key="dl_anomalies",  # не перезапускать страницу при скачивании
+        key="dl_anomalies",
     )
 
-    if res.get("full_csv") is not None:
-        st.caption(f"Размер подготовленного файла: {len(res['full_csv']) / 1024:.0f} КБ")
-
-    if res.get("full_csv") is not None:
+    if res.get("full_xlsx") is not None:
         st.download_button(
-            "Скачать весь файл с Score и Anomaly (CSV)",
-            res["full_csv"],
+            "Скачать весь файл с Score и Anomaly (Excel)",
+            res["full_xlsx"],
             file_name="all_transactions_scored.xlsx",
             mime=XLSX_MIME,
             key="dl_full",
         )
     else:
-        st.caption(f"Файл больше {FULL_CSV_MAX} строк, полная выгрузка отключена: "
+        st.caption(f"Файл больше {FULL_XLSX_MAX} строк, полная выгрузка отключена: "
                    "скачайте список аномалий.")
 
 
@@ -132,11 +125,11 @@ def show_comparison(comp):
                    "с самым высоким score.")
 
     st.download_button(
-        "Скачать таблицу сравнения (CSV)",
-        table.round(4).to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
-        file_name="comparison.csv",
-        mime="text/csv",
-        on_click="ignore",
+        "Скачать таблицу сравнения (Excel)",
+        to_xlsx(table.round(4)),
+        file_name="comparison.xlsx",
+        mime=XLSX_MIME,
+        key="dl_comparison",
     )
 
     st.subheader("Время работы")
@@ -260,16 +253,31 @@ if b1.button("Запустить анализ"):
             result = detect_anomalies(df, method, use_log, feature_cols, label_col, top_frac)
             seconds = time.perf_counter() - start
 
+            # всё тяжёлое считаем один раз и кладём в сессию готовым
             sorted_all = result.sort_values("Score", ascending=False)
-            csv = to_xlsx(sorted_all[sorted_all["Anomaly"] == 1])
-            full_csv = to_xlsx(sorted_all) if len(result) <= FULL_CSV_MAX else None
+            anomalies = sorted_all[sorted_all["Anomaly"] == 1]
 
-        y = get_labels(df, label_col)
-        metrics = calc_metrics(y, result["Anomaly"]) if y is not None else None
+            amount_sample = None
+            if "Amount" in result.columns:
+                d = result[["Amount", "Anomaly"]].copy()
+                d["Тип"] = d["Anomaly"].map({0: "Обычные", 1: "Аномалии"})
+                amount_sample = pd.concat([
+                    g.sample(min(len(g), MAX_POINTS), random_state=42)
+                    for _, g in d.groupby("Anomaly")
+                ])
+
+            anomalies_xlsx = to_xlsx(anomalies)
+            full_xlsx = to_xlsx(sorted_all) if len(result) <= FULL_XLSX_MAX else None
+
+            y = get_labels(df, label_col)
+            metrics = calc_metrics(y, result["Anomaly"]) if y is not None else None
+            confusion = confusion_table(y, result["Anomaly"]) if y is not None else None
+
         st.session_state["single"] = {
-            "method": method, "result": result, "metrics": metrics,
-            "confusion": confusion_table(y, result["Anomaly"]) if y is not None else None,
-            "seconds": seconds, "csv": csv, "full_csv": full_csv,
+            "method": method, "metrics": metrics, "confusion": confusion,
+            "anomalies": anomalies, "n_total": len(result),
+            "amount_sample": amount_sample, "seconds": seconds,
+            "anomalies_xlsx": anomalies_xlsx, "full_xlsx": full_xlsx,
             "top_frac": top_frac,
         }
     except Exception as e:
