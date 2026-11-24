@@ -28,9 +28,22 @@ def _parallel(func, X, chunk=20000):
     return np.concatenate(results)
 
 
-def fit_predict_score(method, train, test, seed=42):
+def fit_predict_score(method, train, test, seed=42, amount_idx=None):
     if method == "Z-score":
         score = np.abs(test).max(axis=1)
+        return (score > 3).astype(int), score
+
+    if method == "Z-score (Amount)":
+        if amount_idx is None:
+            raise ValueError("Не найден столбец Amount.")
+        score = np.abs(test[:, amount_idx])
+        return (score > 3).astype(int), score
+
+    if method == "Z-score (робастный)":
+        med = np.median(train, axis=0)
+        mad = np.median(np.abs(train - med), axis=0)
+        mad = np.where(mad == 0, 1e-9, mad)
+        score = (np.abs(test - med) / (1.4826 * mad)).max(axis=1)
         return (score > 3).astype(int), score
 
     if method not in MODELS:

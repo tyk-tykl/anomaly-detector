@@ -15,3 +15,12 @@ def clean_and_scale(X_train, X_test):
     X_train, X_test = X_train.fillna(medians), X_test.fillna(medians)
     scaler = StandardScaler().fit(X_train)
     return scaler.transform(X_train), scaler.transform(X_test)
+
+def add_features(X, mode="base"):
+    """mode: base | log | log+hour"""
+    X = X.copy()
+    if mode in ("log", "log+hour") and "Amount" in X.columns:
+        X["Amount"] = np.log1p(X["Amount"].clip(lower=0))
+    if mode == "log+hour" and "Time" in X.columns:
+        X["Time"] = (X["Time"] // 3600) % 24
+    return X
