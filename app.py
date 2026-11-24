@@ -32,7 +32,7 @@ def show_single_result(res):
         c2.metric("Recall", f"{metrics['Recall']:.4f}")
         c3.metric("F1-score", f"{metrics['F1-score']:.4f}")
     else:
-        st.info("Для оценки качества нужен столбец Class со значениями 0 и 1.")
+        st.info("Для оценки качества выберите в боковой панели столбец с меткой (значения 0 и 1).")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Всего транзакций", len(result))
@@ -193,6 +193,27 @@ if st.session_state.get("file_id") != uploaded.file_id:
 
 df = st.session_state["df"]
 
+# ---------- Выбор столбцов ----------
+st.sidebar.subheader("Столбцы")
+all_cols = list(df.columns)
+label_options = ["— нет —"] + all_cols
+label_choice = st.sidebar.selectbox(
+    "Столбец с меткой (необязательно)", label_options,
+    index=label_options.index("Class") if "Class" in all_cols else 0,
+    help="Столбец, где 1 — аномалия, 0 — норма. Нужен только для подсчёта метрик, "
+         "в признаки он не попадает.")
+label_col = None if label_choice == "— нет —" else label_choice
+
+candidates = [c for c in all_cols if c != label_col]
+default_feats = [c for c in candidates if not c.lower().endswith("id")]
+feature_cols = st.sidebar.multiselect(
+    "Признаки для анализа", candidates, default=default_feats,
+    help="Числа берутся как есть, даты превращаются в час и день недели, "
+         "текстовые столбцы — в частоту встречаемости. Столбцы-идентификаторы лучше убрать.")
+if not feature_cols:
+    st.warning("Выберите хотя бы один признак в боковой панели.")
+    st.stop()
+
 st.success("Файл успешно загружен!")
 c1, c2 = st.columns(2)
 c1.metric("Строк", len(df))
@@ -207,7 +228,7 @@ if b1.button("Запустить анализ"):
     try:
         with st.spinner("Идёт анализ..."):
             start = time.perf_counter()
-            result = detect_anomalies(df, method, use_log)
+            result = detect_anomalies(df, method, use_log, feature_cols, label_col)
             seconds = time.perf_counter() - start
 
             csv = (
@@ -223,7 +244,7 @@ if b1.button("Запустить анализ"):
                     .to_csv(index=False, sep=";", decimal=",", float_format="%.8g")
                     .encode("utf-8-sig")
                 )
-        y = get_labels(df)
+        y = get_labels(df, label_col)
         metrics = calc_metrics(y, result["Anomaly"]) if y is not None else None
         st.session_state["single"] = {
             "method": method, "result": result, "metrics": metrics,
@@ -236,7 +257,8 @@ if b1.button("Запустить анализ"):
 if b2.button("Сравнить все алгоритмы"):
     try:
         with st.spinner("Сравниваю алгоритмы..."):
-            comp = compare_methods(df, use_log=use_log)
+            comp = compare_methods(df, use_log=use_log,
+                                   feature_cols=feature_cols, label_col=label_col)
             save_comparison(comp[0])
             st.session_state["comparison"] = comp
     except Exception as e:

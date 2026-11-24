@@ -15,7 +15,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 
 from .models import METHODS, fit_predict_score
-from .preprocessing import add_features, clean_and_scale, get_features
+from .preprocessing import add_features, build_features, clean_and_scale
 
 MAX_TEST = 100000
 MAX_CURVE_POINTS = 500
@@ -28,10 +28,10 @@ MEAN_COLS = ["Precision", "Recall", "F1-score", "Avg Precision",
 STD_COLS = ["F1-score", "Avg Precision", "ROC-AUC", "Recall@1%"]
 
 
-def get_labels(df):
-    if "Class" not in df.columns:
+def get_labels(df, label_col="Class"):
+    if not label_col or label_col not in df.columns:
         return None
-    y = pd.to_numeric(df["Class"], errors="coerce")
+    y = pd.to_numeric(df[label_col], errors="coerce")
     if y.isna().any() or not y.isin([0, 1]).all() or y.nunique() < 2:
         return None
     return y.astype(int)
@@ -54,6 +54,11 @@ def confusion_table(y_true, y_pred):
     )
 
 
+def prepare_X(df, feature_cols=None, label_col="Class", use_log=True):
+    X = build_features(df, feature_cols, label_col)
+    return add_features(X, "log" if use_log else "base")
+
+
 def _explain(test, columns, rows, top=3):
     sub = test[rows]
     order = np.argsort(-np.abs(sub), axis=1)[:, :top]
@@ -63,12 +68,12 @@ def _explain(test, columns, rows, top=3):
     ]
 
 
-def detect_anomalies(df, method, use_log=True):
-    X = add_features(get_features(df), "log" if use_log else "base")
+def detect_anomalies(df, method, use_log=True, feature_cols=None, label_col="Class"):
+    X = prepare_X(df, feature_cols, label_col, use_log)
     train, test = clean_and_scale(X, X)
     pred, score = fit_predict_score(method, train, test)
 
-    result = df.copy()  # Class остаётся в таблице, в признаки он не попадает
+    result = df.copy()  # метка остаётся в таблице, в признаки она не попадает
     result["Score"] = score
     result["Anomaly"] = pred
     result["Почему аномально"] = ""
@@ -99,12 +104,13 @@ def _top_k_metrics(y_true, score, frac=TOP_FRAC):
     }
 
 
-def evaluate_holdout(df, method, seed=42, use_log=True):
-    y = get_labels(df)
+def evaluate_holdout(df, method, seed=42, use_log=True,
+                     feature_cols=None, label_col="Class"):
+    y = get_labels(df, label_col)
     if y is None:
-        raise ValueError("Для оценки нужен столбец Class со значениями 0 и 1 (оба класса).")
+        raise ValueError("Для оценки нужен столбец с меткой 0/1 (оба класса).")
 
-    X = add_features(get_features(df), "log" if use_log else "base")
+    X = prepare_X(df, feature_cols, label_col, use_log)
     strat = y if y.value_counts().min() >= 2 else None
     X_tr, X_te, _, y_te = train_test_split(
         X, y, test_size=0.2, random_state=seed, stratify=strat
@@ -130,15 +136,16 @@ def evaluate_holdout(df, method, seed=42, use_log=True):
     return metrics, _pr_curve(y_te, score)
 
 
-def compare_methods(df, seeds=SEEDS, use_log=True):
-    y = get_labels(df)
+def compare_methods(df, seeds=SEEDS, use_log=True,
+                    feature_cols=None, label_col="Class"):
+    y = get_labels(df, label_col)
     rows, curves = [], []
     for m in METHODS:
         start = time.perf_counter()
         if y is not None:
             runs, curve = [], None
             for seed in seeds:
-                metrics, c = evaluate_holdout(df, m, seed, use_log)
+                metrics, c = evaluate_holdout(df, m, seed, use_log, feature_cols, label_col)
                 runs.append(metrics)
                 if curve is None:
                     curve = c  # PR-кривая берётся из первого запуска
@@ -151,7 +158,7 @@ def compare_methods(df, seeds=SEEDS, use_log=True):
             row["Время (сек.)"] = round((time.perf_counter() - start) / len(seeds), 2)
             curves.append(curve.assign(Алгоритм=m))
         else:
-            found = int(detect_anomalies(df, m, use_log)["Anomaly"].sum())
+            found = int(detect_anomalies(df, m, use_log, feature_cols, label_col)["Anomaly"].sum())
             row = {"Алгоритм": m, "Найдено аномалий": found}
             row["Время (сек.)"] = round(time.perf_counter() - start, 2)
         rows.append(row)
