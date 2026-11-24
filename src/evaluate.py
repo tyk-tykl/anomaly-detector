@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     average_precision_score,
+    confusion_matrix,
     f1_score,
     precision_recall_curve,
     precision_score,
@@ -13,8 +14,8 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 
-from .models import METHODS, fit_predict, fit_predict_score
-from .preprocessing import clean_and_scale, get_features
+from .models import METHODS, fit_predict_score
+from .preprocessing import add_features, clean_and_scale, get_features
 
 MAX_TEST = 100000
 MAX_CURVE_POINTS = 500
@@ -44,11 +45,38 @@ def calc_metrics(y_true, y_pred):
     }
 
 
-def detect_anomalies(df, method):
-    X = get_features(df)
+def confusion_table(y_true, y_pred):
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+    return pd.DataFrame(
+        [[tn, fp], [fn, tp]],
+        index=["Факт: обычная", "Факт: аномалия"],
+        columns=["Найдена как обычная", "Найдена как аномалия"],
+    )
+
+
+def _explain(test, columns, rows, top=3):
+    sub = test[rows]
+    order = np.argsort(-np.abs(sub), axis=1)[:, :top]
+    return [
+        ", ".join(f"{columns[j]} ({row[j]:+.1f}σ)" for j in o)
+        for row, o in zip(sub, order)
+    ]
+
+
+def detect_anomalies(df, method, use_log=True):
+    X = add_features(get_features(df), "log" if use_log else "base")
     train, test = clean_and_scale(X, X)
-    result = df.drop(columns=["Class"], errors="ignore").copy()
-    result["Anomaly"] = fit_predict(method, train, test)
+    pred, score = fit_predict_score(method, train, test)
+
+    result = df.copy()  # Class остаётся в таблице, в признаки он не попадает
+    result["Score"] = score
+    result["Anomaly"] = pred
+    result["Почему аномально"] = ""
+
+    rows = np.flatnonzero(pred == 1)
+    if len(rows):
+        col = result.columns.get_loc("Почему аномально")
+        result.iloc[rows, col] = _explain(test, list(X.columns), rows)
     return result
 
 
@@ -71,12 +99,12 @@ def _top_k_metrics(y_true, score, frac=TOP_FRAC):
     }
 
 
-def evaluate_holdout(df, method, seed=42):
+def evaluate_holdout(df, method, seed=42, use_log=True):
     y = get_labels(df)
     if y is None:
         raise ValueError("Для оценки нужен столбец Class со значениями 0 и 1 (оба класса).")
 
-    X = get_features(df)
+    X = add_features(get_features(df), "log" if use_log else "base")
     strat = y if y.value_counts().min() >= 2 else None
     X_tr, X_te, _, y_te = train_test_split(
         X, y, test_size=0.2, random_state=seed, stratify=strat
@@ -102,7 +130,7 @@ def evaluate_holdout(df, method, seed=42):
     return metrics, _pr_curve(y_te, score)
 
 
-def compare_methods(df, seeds=SEEDS):
+def compare_methods(df, seeds=SEEDS, use_log=True):
     y = get_labels(df)
     rows, curves = [], []
     for m in METHODS:
@@ -110,7 +138,7 @@ def compare_methods(df, seeds=SEEDS):
         if y is not None:
             runs, curve = [], None
             for seed in seeds:
-                metrics, c = evaluate_holdout(df, m, seed)
+                metrics, c = evaluate_holdout(df, m, seed, use_log)
                 runs.append(metrics)
                 if curve is None:
                     curve = c  # PR-кривая берётся из первого запуска
@@ -123,7 +151,7 @@ def compare_methods(df, seeds=SEEDS):
             row["Время (сек.)"] = round((time.perf_counter() - start) / len(seeds), 2)
             curves.append(curve.assign(Алгоритм=m))
         else:
-            found = int(detect_anomalies(df, m)["Anomaly"].sum())
+            found = int(detect_anomalies(df, m, use_log)["Anomaly"].sum())
             row = {"Алгоритм": m, "Найдено аномалий": found}
             row["Время (сек.)"] = round(time.perf_counter() - start, 2)
         rows.append(row)

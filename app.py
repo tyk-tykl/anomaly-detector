@@ -4,17 +4,19 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from src.evaluate import calc_metrics, compare_methods, detect_anomalies, get_labels, save_comparison
+from src.evaluate import (calc_metrics, compare_methods, confusion_table,
+                          detect_anomalies, get_labels, save_comparison)
 from src.models import METHODS
 
 SHOW_ROWS = 1000  # сколько аномалий показывать в таблице
 MAX_POINTS = 2000   # сколько точек каждого типа рисовать на графике сумм
+FULL_CSV_MAX = 100000  # полный файл предлагаем скачать, если строк не больше
 COLORS = alt.Scale(domain=["Обычные", "Аномалии"], range=["#4388D6", "#E05252"])
 
 
 def show_single_result(res):
     result, metrics = res["result"], res["metrics"]
-    anomalies = result[result["Anomaly"] == 1]
+    anomalies = result[result["Anomaly"] == 1].sort_values("Score", ascending=False)
 
     st.success(f"Анализ завершён: {res['method']} (расчёт занял {res['seconds']:.1f} сек.)")
 
@@ -24,6 +26,9 @@ def show_single_result(res):
                    "Честную оценку смотрите в «Сравнить все алгоритмы».")
         c1, c2, c3 = st.columns(3)
         c1.metric("Precision", f"{metrics['Precision']:.4f}")
+        if res.get("confusion") is not None:
+            st.write("Матрица ошибок")
+            st.dataframe(res["confusion"], width="stretch")
         c2.metric("Recall", f"{metrics['Recall']:.4f}")
         c3.metric("F1-score", f"{metrics['F1-score']:.4f}")
     else:
@@ -35,10 +40,16 @@ def show_single_result(res):
     c3.metric("Доля аномалий", f"{len(anomalies) / len(result) * 100:.2f}%")
 
     st.subheader("Найденные аномалии")
+    st.caption("Отсортированы по Score: чем выше, тем необычнее запись. Шкала Score у разных "
+               "алгоритмов своя, сравнивать её между ними нельзя. В «Почему аномально» указаны "
+               "три признака, сильнее всего отклонившихся от среднего (в стандартных отклонениях σ). "
+               "Это приближённое объяснение, а не внутренняя логика модели.")
     if len(anomalies) > SHOW_ROWS:
         st.caption(f"Показаны первые {SHOW_ROWS} из {len(anomalies)} записей. "
                    "Полный список можно скачать в CSV.")
-    st.dataframe(anomalies.head(SHOW_ROWS), width="stretch")
+    first = ["Score", "Почему аномально"]
+    cols = first + [c for c in anomalies.columns if c not in first]
+    st.dataframe(anomalies[cols].head(SHOW_ROWS), width="stretch")
 
     st.subheader("Визуализация")
     counts = pd.DataFrame({
@@ -79,6 +90,18 @@ def show_single_result(res):
         mime="text/csv",
         on_click="ignore",  # не перезапускать страницу при скачивании
     )
+
+    if res.get("full_csv") is not None:
+        st.download_button(
+            "Скачать весь файл с Score и Anomaly (CSV)",
+            res["full_csv"],
+            file_name="all_transactions_scored.csv",
+            mime="text/csv",
+            on_click="ignore",
+        )
+    else:
+        st.caption(f"Файл больше {FULL_CSV_MAX} строк, полная выгрузка отключена: "
+                   "скачайте список аномалий.")
 
 
 def show_comparison(comp):
@@ -147,6 +170,10 @@ st.divider()
 
 method = st.sidebar.selectbox("Выберите алгоритм", METHODS)
 
+use_log = st.sidebar.checkbox(
+    "Логарифм суммы (log1p)", value=True,
+    help="Суммы распределены асимметрично, логарифм делает их ближе к симметричным.")
+
 uploaded = st.file_uploader("Выберите CSV-файл с транзакциями", type=["csv"])
 
 if uploaded is None:
@@ -180,19 +207,28 @@ if b1.button("Запустить анализ"):
     try:
         with st.spinner("Идёт анализ..."):
             start = time.perf_counter()
-            result = detect_anomalies(df, method)
+            result = detect_anomalies(df, method, use_log)
             seconds = time.perf_counter() - start
 
             csv = (
                 result[result["Anomaly"] == 1]
+                .sort_values("Score", ascending=False)
                 .to_csv(index=False, sep=";", decimal=",", float_format="%.8g")
                 .encode("utf-8-sig")
             )
+            full_csv = None
+            if len(result) <= FULL_CSV_MAX:
+                full_csv = (
+                    result.sort_values("Score", ascending=False)
+                    .to_csv(index=False, sep=";", decimal=",", float_format="%.8g")
+                    .encode("utf-8-sig")
+                )
         y = get_labels(df)
         metrics = calc_metrics(y, result["Anomaly"]) if y is not None else None
         st.session_state["single"] = {
             "method": method, "result": result, "metrics": metrics,
-            "seconds": seconds, "csv": csv,
+            "confusion": confusion_table(y, result["Anomaly"]) if y is not None else None,
+            "seconds": seconds, "csv": csv, "full_csv": full_csv,
         }
     except Exception as e:
         st.error(f"Ошибка при анализе: {e}")
@@ -200,7 +236,7 @@ if b1.button("Запустить анализ"):
 if b2.button("Сравнить все алгоритмы"):
     try:
         with st.spinner("Сравниваю алгоритмы..."):
-            comp = compare_methods(df)
+            comp = compare_methods(df, use_log=use_log)
             save_comparison(comp[0])
             st.session_state["comparison"] = comp
     except Exception as e:
