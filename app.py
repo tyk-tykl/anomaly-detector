@@ -28,6 +28,10 @@ def show_single_result(res):
 
     st.success(f"Анализ завершён: {res['method']} (расчёт занял {res['seconds']:.1f} сек.)")
 
+    if res.get("top_frac"):
+        st.caption(f"Режим заданной доли: помечено {res['top_frac'] * 100:.1f}% записей "
+                   "с самым высоким Score.")
+
     if metrics:
         st.subheader("Оценка качества")
         st.caption("Метрики на всём файле (модель видела эти данные при обучении). "
@@ -185,6 +189,17 @@ use_log = st.sidebar.checkbox(
     "Логарифм суммы (log1p)", value=True,
     help="Суммы распределены асимметрично, логарифм делает их ближе к симметричным.")
 
+budget_mode = st.sidebar.radio(
+    "Сколько записей помечать",
+    ["По умолчанию алгоритма", "Заданная доля"],
+    help="По умолчанию каждый алгоритм сам решает, что считать аномалией, и помечает "
+         "разное число записей. «Заданная доля» берёт записи с самым высоким Score: "
+         "так все алгоритмы дают список одинаковой длины.")
+top_frac = None
+if budget_mode == "Заданная доля":
+    pct = st.sidebar.slider("Доля помечаемых записей, %", 0.1, 10.0, 1.0, 0.1)
+    top_frac = pct / 100
+
 uploaded = st.file_uploader("Выберите CSV-файл с транзакциями", type=["csv"])
 
 if uploaded is None:
@@ -242,7 +257,7 @@ if b1.button("Запустить анализ"):
     try:
         with st.spinner("Идёт анализ..."):
             start = time.perf_counter()
-            result = detect_anomalies(df, method, use_log, feature_cols, label_col)
+            result = detect_anomalies(df, method, use_log, feature_cols, label_col, top_frac)
             seconds = time.perf_counter() - start
 
             sorted_all = result.sort_values("Score", ascending=False)
@@ -255,6 +270,7 @@ if b1.button("Запустить анализ"):
             "method": method, "result": result, "metrics": metrics,
             "confusion": confusion_table(y, result["Anomaly"]) if y is not None else None,
             "seconds": seconds, "csv": csv, "full_csv": full_csv,
+            "top_frac": top_frac,
         }
     except Exception as e:
         st.error(f"Ошибка при анализе: {e}")

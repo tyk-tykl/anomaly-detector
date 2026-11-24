@@ -67,11 +67,21 @@ def _explain(test, columns, rows, top=3):
         for row, o in zip(sub, order)
     ]
 
+def top_fraction_labels(score, frac):
+    """Помечает аномалиями долю frac записей с самым высоким Score."""
+    k = max(1, int(round(len(score) * frac)))
+    top = np.argsort(score)[::-1][:k]
+    pred = np.zeros(len(score), dtype=int)
+    pred[top] = 1
+    return pred
 
-def detect_anomalies(df, method, use_log=True, feature_cols=None, label_col="Class"):
+def detect_anomalies(df, method, use_log=True, feature_cols=None,
+                     label_col="Class", top_frac=None):
     X = prepare_X(df, feature_cols, label_col, use_log)
     train, test = clean_and_scale(X, X)
     pred, score = fit_predict_score(method, train, test)
+    if top_frac is not None:
+        pred = top_fraction_labels(score, top_frac)
 
     result = df.copy()  # метка остаётся в таблице, в признаки она не попадает
     result["Score"] = score
